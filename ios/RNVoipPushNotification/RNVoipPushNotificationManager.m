@@ -55,6 +55,11 @@ static NSString *RCTCurrentAppBackgroundState()
 
 @end
 
+@interface RNVoipPushNotificationManager()
+@property(nonatomic, strong) PKPushRegistry * voipRegistry;
+
+@end
+
 @implementation RNVoipPushNotificationManager
 
 RCT_EXPORT_MODULE();
@@ -141,24 +146,24 @@ static NSMutableDictionary<NSString *, RNVoipPushNotificationCompletion> *comple
     dispatch_queue_t mainQueue = dispatch_get_main_queue();
     dispatch_async(mainQueue, ^{
       // Create a push registry object
-      PKPushRegistry * voipRegistry = [[PKPushRegistry alloc] initWithQueue: mainQueue];
+      self.voipRegistry = [[PKPushRegistry alloc] initWithQueue: mainQueue];
       // Set the registry's delegate to AppDelegate
-      voipRegistry.delegate = (RNVoipPushNotificationManager *)RCTSharedApplication().delegate;
+      self.voipRegistry.delegate = (RNVoipPushNotificationManager *)RCTSharedApplication().delegate;
       // Set the push type to VoIP
-      voipRegistry.desiredPushTypes = [NSSet setWithObject:PKPushTypeVoIP];
+      self.voipRegistry.desiredPushTypes = [NSSet setWithObject:PKPushTypeVoIP];
     });
 }
 
 - (NSDictionary *)checkPermissions
 {
     NSUInteger types = [RCTSharedApplication() currentUserNotificationSettings].types;
-  
+
     return @{
         @"alert": @((types & UIUserNotificationTypeAlert) > 0),
         @"badge": @((types & UIUserNotificationTypeBadge) > 0),
         @"sound": @((types & UIUserNotificationTypeSound) > 0),
     };
-  
+
 }
 
 + (NSString *)getCurrentAppBackgroundState
@@ -269,6 +274,33 @@ RCT_EXPORT_METHOD(presentLocalNotification:(UILocalNotification *)notification)
 {
     dispatch_async(dispatch_get_main_queue(), ^{
         [RCTSharedApplication() presentLocalNotificationNow:notification];
+    });
+}
+
+RCT_EXPORT_METHOD(getVoIPPushToken) {
+    if (RCTRunningInAppExtension()) {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.voipRegistry) {
+            self.voipRegistry = [[PKPushRegistry alloc] initWithQueue:nil];
+            self.voipRegistry.delegate = (RNVoipPushNotificationManager *)RCTSharedApplication().delegate;
+            self.voipRegistry.desiredPushTypes = [NSSet setWithObject:PKPushTypeVoIP];
+        }
+        NSData *token = [self.voipRegistry pushTokenForType:PKPushTypeVoIP];
+        if (!token) {
+            NSLog(@"[RNVoipPushNotificationManager] getVoIPPushToken: token is null");
+            return;
+        }
+        NSMutableString *hexString = [NSMutableString string];
+        NSUInteger voipTokenLength = token.length;
+        const unsigned char *bytes = token.bytes;
+        for (NSUInteger i = 0; i < voipTokenLength; i++) {
+            [hexString appendFormat:@"%02x", bytes[i]];
+        }
+        [[NSNotificationCenter defaultCenter] postNotificationName:RNVoipRemoteNotificationsRegistered
+                                                            object:self
+                                                          userInfo:@{@"deviceToken" : [hexString copy]}];
     });
 }
 
